@@ -12,15 +12,18 @@ static b2World *world;
 
 @implementation waterFun
 
+// destroy the world
 + (void)destroyWorld {
     delete world;
     world = nil;
 }
 
+// create the world using the gravity provided
 + (void)createWorldWithGravity:(Vector2D)gravity {
     world = new b2World(b2Vec2(gravity.x, gravity.y));
 }
 
+// create a particle system which will contains the particles
 + (void *)createParticleSystemWithRadius:(float)radius dampingStrength:(float)dampingStrength gravityScale:(float)gravityScale density:(float)density {
     b2ParticleSystemDef particleSysDef;
     particleSysDef.radius = radius;
@@ -31,6 +34,7 @@ static b2World *world;
     return particleSys;
 }
 
+// create a box of particles for the particle system
 + (void)createParticleBoxForSystem:(void *)particleSystem position:(Vector2D)position size:(Size2D)size {
     b2PolygonShape shape;
     shape.SetAsBox(size.width * 0.5f, size.height * 0.5f);
@@ -42,18 +46,22 @@ static b2World *world;
     ((b2ParticleSystem *)particleSystem)->CreateParticleGroup(particleGroupDef);
 }
 
+// get number of particles inside a particle system
 + (int)particleCountForSystem:(void *)particleSystem {
     return ((b2ParticleSystem *)particleSystem)->GetParticleCount();
 }
 
+// returns an array of all particles' positions
 + (void *)particlePositionsForSystem:(void *)particleSystem {
     return ((b2ParticleSystem *)particleSystem)->GetPositionBuffer();
 }
 
+// simulate particles' with a time step
 + (void)worldStep:(CFTimeInterval)timeStep velocityIterations:(int)velocityIterations positionIterations:(int)positionIterations {
     world->Step(timeStep, velocityIterations, positionIterations);
 }
 
+// create a box with the specified size
 + (void *)createEdgeBoxWithOrigin:(Vector2D)origin size:(Size2D)size {
     // create the body
     b2BodyDef bodyDef;
@@ -82,10 +90,12 @@ static b2World *world;
     return body;
 }
 
+// set the gravity of the world
 + (void)setGravity:(Vector2D)gravity {
     world->SetGravity(b2Vec2(gravity.x, gravity.y));
 }
 
+// limit the number of particles inside a particle system
 + (void)setParticleLimitForSystem:(void *)particleSystem maxParticles:(int)maxParticles {
     ((b2ParticleSystem *)particleSystem)->SetDestructionByAge(false);
     ((b2ParticleSystem *)particleSystem)->SetMaxParticleCount(maxParticles);

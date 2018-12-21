@@ -23,16 +23,17 @@ typedef struct myFloat16 {
 @property(nonatomic) float gravity;
 @property(nonatomic) float ptmRatio;
 @property(nonatomic) float particleRadius;
-@property(nonatomic) void *particleSys;
-@property(nonatomic, weak) id<MTLDevice> mtlDevice;
-@property(nonatomic, weak) CAMetalLayer* metalLayer;
 @property(nonatomic) int particleCount;
+@property(nonatomic) int maxParticles;
+
+@property(nonatomic) void *particleSys;
+@property(nonatomic, weak) CAMetalLayer* metalLayer;
+@property(nonatomic) id<MTLDevice> mtlDevice;
 @property(nonatomic) id<MTLBuffer> vertexBuffer;
 @property(nonatomic) id<MTLBuffer> uniformBuffer;
 @property(nonatomic) id<MTLRenderPipelineState> pipelineState;
 @property(nonatomic) id<MTLCommandQueue> commandQueue;
 @property(nonatomic) CMMotionManager *motionManager;
-@property(nonatomic) int maxParticles;
 @end
 
 @implementation MainViewController
@@ -49,40 +50,43 @@ typedef struct myFloat16 {
     [waterFun createWorldWithGravity:gravityVec];
     // Do any additional setup after loading the view, typically from a nib.
     self.particleSys = [waterFun createParticleSystemWithRadius:self.particleRadius / self.ptmRatio dampingStrength:0.2 gravityScale:1.0 density:1.2];
+    [waterFun setParticleLimitForSystem:self.particleSys maxParticles:self.maxParticles]; // max particles
     
     CGSize screenSize = [[UIScreen mainScreen] bounds].size;
     Vector2D positionVec = {screenSize.width * 0.5 / self.ptmRatio, screenSize.height * 0.5 / self.ptmRatio};
     Size2D sizeVec = {66 / self.ptmRatio, 66 / self.ptmRatio};
     [waterFun createParticleBoxForSystem:self.particleSys position:positionVec size:sizeVec];
     
-    [waterFun setParticleLimitForSystem:self.particleSys maxParticles:self.maxParticles]; // max particles
-    
     Vector2D edgeBoxOrigin = {0, 0};
     Size2D edgeBoxSize = {screenSize.width / self.ptmRatio, screenSize.height / self.ptmRatio};
     [waterFun createEdgeBoxWithOrigin:edgeBoxOrigin size:edgeBoxSize];
     
-    [self printParticleInfo];
+    //[self printParticleInfo];
     [self createMetalLayer];
     [self refreshVertexBuffer];
     [self refreshUniformBuffer];
     [self buildRenderPipeline];
     [self render];
     
-    CADisplayLink *displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updateDisplayLink:)];
-    [displayLink setPreferredFramesPerSecond:0];
-    [displayLink addToRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
-    
+    // make the particles can move as the cellphone tilts
     [self.motionManager startAccelerometerUpdatesToQueue:[NSOperationQueue currentQueue] withHandler:^(CMAccelerometerData * _Nullable accelerometerData, NSError * _Nullable error) {
         CMAcceleration acceleration = [accelerometerData acceleration];
         Vector2D gravity = {acceleration.x * self.gravity, acceleration.y * self.gravity};
         [waterFun setGravity:gravity];
     }];
+    
+    // update the particle movements by default frame rate
+    CADisplayLink *displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updateDisplayLink:)];
+    [displayLink setPreferredFramesPerSecond:0];
+    [displayLink addToRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
 }
 
+// called when this view controller is no longer presented
 - (void)dealloc {
     [waterFun destroyWorld];
 }
 
+// handle when touch on screen, add a particle box in the current particle system
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     [touches enumerateObjectsUsingBlock:^(UITouch * _Nonnull obj, BOOL * _Nonnull stop) {
         CGPoint touchLocation = [obj locationInView:self.view];
@@ -93,6 +97,7 @@ typedef struct myFloat16 {
     }];
 }
 
+// print out the particles in current particle system info
 - (void)printParticleInfo {
     int count = [waterFun particleCountForSystem:self.particleSys];
     NSLog(@"Total particle count: %d", count);
@@ -102,6 +107,7 @@ typedef struct myFloat16 {
     }
 }
 
+// create the metal layer
 - (void)createMetalLayer {
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
     self.mtlDevice = device;
@@ -113,12 +119,13 @@ typedef struct myFloat16 {
     [[self.view layer] addSublayer:self.metalLayer];
 }
 
+// update vertex position buffer
 - (void)refreshVertexBuffer {
     self.particleCount = [waterFun particleCountForSystem:self.particleSys];
     self.vertexBuffer = [self.mtlDevice newBufferWithBytes:[waterFun particlePositionsForSystem:self.particleSys] length:sizeof(float) * self.particleCount * 2 options:MTLResourceStorageModeShared];
-    
 }
 
+// make an orthographic matrix
 - (myFloat16)makeOrthographicMatrixWithLeft: (float)left Right:(float)right Bottom:(float)bottom Top:(float)top Near:(float)near Far:(float)far {
     float ral = right + left;
     float rsl = right - left;
@@ -136,6 +143,7 @@ typedef struct myFloat16 {
     return float16;
 }
 
+// update uniform buffer
 - (void)refreshUniformBuffer {
     CGSize screenSize = [[UIScreen mainScreen] bounds].size;
     myFloat16 ndcMatrix = [self makeOrthographicMatrixWithLeft:0 Right:screenSize.width Bottom:0 Top:screenSize.height Near:-1 Far:1];
@@ -147,7 +155,6 @@ typedef struct myFloat16 {
     int paddingBytesSize = float4x4ByteAlignment - sizeof(float) * 2;
     int uniformStructSize = float4x4Size + sizeof(float) * 2 + paddingBytesSize;
     
-    // 3
     self.uniformBuffer = [self.mtlDevice newBufferWithLength:uniformStructSize options:MTLResourceStorageModeShared];
     void *bufferPointer = [self.uniformBuffer contents];
     memcpy(bufferPointer, &ndcMatrix, float4x4Size);
@@ -155,6 +162,7 @@ typedef struct myFloat16 {
     memcpy(bufferPointer + float4x4Size + sizeof(float), &radius, sizeof(float));
 }
 
+// create render pipline object
 - (void)buildRenderPipeline {
     id<MTLLibrary> defaultLibrary = [self.mtlDevice newDefaultLibrary];
     id<MTLFunction> fragmentFunc = [defaultLibrary newFunctionWithName:@"basic_fragment"];
@@ -172,6 +180,7 @@ typedef struct myFloat16 {
     self.commandQueue = [self.mtlDevice newCommandQueue];
 }
 
+// render the particles
 - (void)render {
     id<CAMetalDrawable> drawable = [self.metalLayer nextDrawable];
     MTLRenderPassDescriptor *renderPassDescriptor = [MTLRenderPassDescriptor renderPassDescriptor];
@@ -192,6 +201,7 @@ typedef struct myFloat16 {
     [commandBuffer commit];
 }
 
+// displaylink updates handler
 - (void)updateDisplayLink:(CADisplayLink *)displayLink {
     [waterFun worldStep:displayLink.duration velocityIterations:8 positionIterations:3];
     [self refreshVertexBuffer];
